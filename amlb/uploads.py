@@ -128,7 +128,7 @@ def _upload_results(task_folder: pathlib.Path) -> openml.runs.OpenMLRun:
     oml_task = openml.tasks.get_task(metadata.openml_task_id)
 
     denormalize_map = {label.strip().lower(): label for label in oml_task.class_labels}
-    predictions.columns = pd.Index(col if col not in denormalize_map else denormalize_map[col] for col in predictions)
+    predictions.columns = [col if col not in denormalize_map else denormalize_map[col] for col in predictions]
     predictions["truth"] = predictions["truth"].apply(denormalize_map.get)
     predictions["predictions"] = predictions["predictions"].apply(denormalize_map.get)
 
@@ -160,7 +160,7 @@ def _upload_results(task_folder: pathlib.Path) -> openml.runs.OpenMLRun:
     else:
         description = None
 
-    run = openml.runs.OpenMLRun(
+    return openml.runs.OpenMLRun(
         task_id=oml_task.id,
         flow_id=oml_flow.id,
         dataset_id=oml_task.dataset_id,
@@ -169,9 +169,7 @@ def _upload_results(task_folder: pathlib.Path) -> openml.runs.OpenMLRun:
         data_content=formatted_predictions,
         tags=tags,
         run_details=description,
-    )
-    run.publish()
-    return run
+    ).publish()
 
 
 def missing_folds(task_folder: pathlib.Path) -> Set[str]:

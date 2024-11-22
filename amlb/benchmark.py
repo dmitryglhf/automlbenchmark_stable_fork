@@ -7,8 +7,6 @@
 - run the jobs.
 - collect and save results.
 """
-from __future__ import annotations
-
 import time
 from copy import copy
 from enum import Enum
@@ -20,8 +18,6 @@ import re
 import signal
 import sys
 from typing import List, Union
-
-import pandas as pd
 
 from .job import Job, JobError, SimpleJobRunner, MultiThreadingJobRunner
 from .datasets import DataLoader, DataSourceType
@@ -61,21 +57,15 @@ class Benchmark:
      - openml datasets
      - openml studies (=benchmark suites)
      - user-defined (list of) datasets
-
-     :param job_history: str or pd.DataFrame, default = None
-        If specified, jobs will be skipped if their result is present in job_history.
-        Useful to avoid duplicate work when trying to retry failed jobs.
-
     """
 
     data_loader = None
     framework_install_required = True
 
-    def __init__(self, framework_name: str, benchmark_name: str, constraint_name: str, job_history: str | pd.DataFrame | None = None):
+    def __init__(self, framework_name: str, benchmark_name: str, constraint_name: str):
         self.job_runner = None
 
         if rconfig().run_mode == 'script':
-            # Used for recovery script
             self.framework_def, self.framework_name, self.framework_module = None, None, None
             self.benchmark_def, self.benchmark_name, self.benchmark_path = None, None, None
             self.constraint_def, self.constraint_name = None, None
@@ -86,8 +76,6 @@ class Benchmark:
         self._forward_params = locals()
         if Benchmark.data_loader is None:
             Benchmark.data_loader = DataLoader(rconfig())
-
-        self._job_history = self._load_job_history(job_history=job_history)
 
         fsplits = framework_name.split(':', 1)
         framework_name = fsplits[0]
@@ -118,20 +106,6 @@ class Benchmark:
         if self.parallel_jobs > 1:
             log.warning("Parallelization is not supported in local mode: ignoring `parallel_jobs=%s` parameter.", self.parallel_jobs)
             self.parallel_jobs = 1
-
-    def _load_job_history(self, job_history: str | pd.DataFrame | None) -> pd.DataFrame:
-        """
-        If job_history is None, return None
-        If str, load result csv from str, return pandas DataFrame
-        If pandas DataFrame, return pandas DataFrame
-        """
-        if job_history is None:
-            return None
-        if isinstance(job_history, str):
-            log.info(f'Loading job history from {job_history}')
-            job_history = read_csv(job_history)
-        self._validate_job_history(job_history=job_history)
-        return job_history
 
     def setup(self, mode: SetupMode):
         """
@@ -223,7 +197,7 @@ class Benchmark:
         # anything to do?
         pass
 
-    def run(self, tasks: str | list[str] | None = None, folds: int | list[int] | None = None):
+    def run(self, tasks: Union[str, List[str]] = None, folds: Union[int, List[int]] = None):
         """
         :param tasks: a single task name [str] or a list of task names to run. If None, then the whole benchmark will be used.
         :param folds: a fold [int] or a list of folds to run. If None, then the all folds from each task definition will be used.
@@ -234,7 +208,6 @@ class Benchmark:
 
             task_defs = self._get_task_defs(tasks)
             jobs = flatten([self._task_jobs(task_def, folds) for task_def in task_defs])
-            log.info(f"Running {len(jobs)} jobs")
             results = self._run_jobs(jobs)
             log.info(f"Processing results for {self.sid}")
             log.debug(results)
@@ -323,6 +296,14 @@ class Benchmark:
         """
         return BenchmarkTask(self, task_def, fold).as_job() if not self._skip_job(task_def, fold) else None
 
+    @lazy_property
+    def _job_history(self):
+        jh = rconfig().job_history
+        if jh and not os.path.exists(jh):
+            log.warning(f"Job history file {jh} does not exist, ignoring it.")
+            return None
+        return read_csv(jh) if jh else None
+
     def _in_job_history(self, task_def, fold):
         jh = self._job_history
         if jh is None:
@@ -332,21 +313,13 @@ class Benchmark:
                       & (jh.id == task_def.id)
                       & (jh.fold == fold)]) > 0
 
-    @staticmethod
-    def _validate_job_history(job_history):
-        required_columns = {'framework', 'constraint', 'id', 'fold'}
-        actual_columns = set(job_history.columns)
-        if missing_columns := (required_columns - actual_columns):
-            quoted_columns = ', '.join(repr(c) for c in missing_columns)
-            raise AssertionError(f'job_history missing required column(s) {quoted_columns}! ')
-
     def _skip_job(self, task_def, fold):
         if fold < 0 or fold >= task_def.folds:
             log.warning(f"Fold value {fold} is out of range for task {task_def.name}, skipping it.")
             return True
 
         if self._in_job_history(task_def, fold):
-            log.info(f"Task {task_def.name} with fold {fold} is already present in job history, skipping it.")
+            log.info(f"Task {task_def.name} with fold {fold} is already present in job history {rconfig().job_history}, skipping it.")
             return True
 
         return False
@@ -440,8 +413,8 @@ class TaskConfig:
             inference_time_extension = 0
             if rconfig().inference_time_measurements.enabled:
                 inference_time_extension = rconfig().inference_time_measurements.additional_job_time
-            overhead_time_multiplier = ns.get(rconfig(), "benchmarks.overhead_time_multiplier", 2)
-            self.job_timeout_seconds = min(value * overhead_time_multiplier, value + rconfig().benchmarks.overhead_time_seconds) + inference_time_extension
+            self.job_timeout_seconds = min(value * 2 + inference_time_extension,
+                                           value + rconfig().benchmarks.overhead_time_seconds + inference_time_extension)
         super().__setattr__(name, value)
 
     def __json__(self):

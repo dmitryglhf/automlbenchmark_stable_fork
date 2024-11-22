@@ -1,7 +1,6 @@
-from __future__ import annotations
-
 from abc import abstractmethod
 import logging
+import math
 import os
 import re
 import tempfile
@@ -53,7 +52,14 @@ class FileLoader:
         if ext == '.arff':
             return ArffDataset(train_path, test_path, target=target, features=features, type=type_)
         elif ext == '.csv':
-            return CsvDataset(train_path, test_path, target=target, features=features, type=type_)
+            if type_ is not None and DatasetType[type_] == DatasetType.timeseries and dataset['timestamp_column'] is None:
+                log.warning("Warning: For timeseries task setting undefined timestamp column to `timestamp`.")
+                dataset = deepcopy(dataset)
+                dataset['timestamp_column'] = "timestamp"
+            csv_dataset = CsvDataset(train_path, test_path, target=target, features=features, type=type_, timestamp_column=dataset['timestamp_column'] if 'timestamp_column' in dataset else None)
+            if csv_dataset.type == DatasetType.timeseries:
+                csv_dataset = self.extend_dataset_with_timeseries_config(csv_dataset, dataset)
+            return csv_dataset
         else:
             raise ValueError(f"Unsupported file type: {ext}")
 
@@ -137,26 +143,7 @@ class FileLoader:
 class FileDataset(Dataset):
 
     def __init__(self, train: Datasplit, test: Datasplit,
-                 target: int | str | None = None, features: list[ns | str] | None = None, type: str | None = None):
-        """
-        
-        Parameters
-        ----------
-        train: Datasplit
-        test: Datasplit
-        target: int or str, optional
-            If int, specifies the column index of the target feature.
-            If str, specifies the column name of the target features.
-            If None, defaults to a feature with name "class" or "target", or the last
-            feature otherwise.
-        features: list[ns | str]
-            #TODO: DEADCODE?
-            I don't see this accessed anywhere, and `features` property is retrieved
-            from split metadata, which also do not reference this.
-        type: str, optional
-          A valid DatasetType. If not specified, it is inferred by the properties of the
-          target column.
-        """
+                 target: Union[int, str] = None, features: List[Union[ns, str]] = None, type: str = None):
         super().__init__()
         self._train = train
         self._test = test
@@ -199,10 +186,10 @@ class FileDataset(Dataset):
 
 class FileDatasplit(Datasplit):
 
-    def __init__(self, dataset: FileDataset, file_format: str, path: str):
-        super().__init__(dataset, file_format)
+    def __init__(self, dataset: FileDataset, format: str, path: str):
+        super().__init__(dataset, format)
         self._path = path
-        self._data = {file_format: path}
+        self._data = {format: path}
 
     def data_path(self, format):
         supported_formats = [cls.format for cls in __file_converters__]
@@ -233,10 +220,9 @@ class FileDatasplit(Datasplit):
 
     def _find_target_feature(self, features: List[Feature]):
         target = self.dataset._target
-        default_target = next((f for f in features if f.name.lower() in ['target', 'class']), features[-1])
         return (features[target] if isinstance(target, int)
                 else next(f for f in features if f.name == target) if isinstance(target, str)
-                else default_target)
+                else next((f for f in features if f.name.lower() in ['target', 'class']), None) or features[-1])
 
     def _set_feature_as_target(self, target: Feature):
         # for classification problems, ensure that the target appears as categorical
@@ -267,7 +253,7 @@ class ArffDataset(FileDataset):
 class ArffDatasplit(FileDatasplit):
 
     def __init__(self, dataset, path):
-        super().__init__(dataset, file_format='arff', path=path)
+        super().__init__(dataset, format='arff', path=path)
         self._ds = None
 
     def _ensure_loaded(self):
@@ -327,7 +313,7 @@ class ArffDatasplit(FileDatasplit):
 class CsvDataset(FileDataset):
 
     def __init__(self, train_path, test_path,
-                 target=None, features=None, type=None):
+                 target=None, features=None, type=None, timestamp_column=None):
         # todo: handle auto-split (if test_path is None): requires loading the training set, split, save
         super().__init__(None, None,
                          target=target, features=features, type=type)
@@ -364,8 +350,6 @@ class TimeSeriesDataset(FileDataset):
         self.id_column = config['id_column']
         self.timestamp_column = config['timestamp_column']
 
-        # Ensure that id_column is parsed as string to avoid incorrect sorting
-        full_data[self.id_column] = full_data[self.id_column].astype(str)
         full_data[self.timestamp_column] = pd.to_datetime(full_data[self.timestamp_column])
         if config['name'] is not None:
             file_name = config['name']
@@ -376,7 +360,7 @@ class TimeSeriesDataset(FileDataset):
 
         self._train = CsvDatasplit(self, train_path, timestamp_column=self.timestamp_column)
         self._test = CsvDatasplit(self, test_path, timestamp_column=self.timestamp_column)
-        self._dtypes = full_data.dtypes
+        self._dtypes = None
 
         # Store repeated item_id & in-sample seasonal error for each time step in the forecast horizon - needed later for metrics like MASE.
         # We need to store this information here because Result object has no access to past time series values.
@@ -419,7 +403,7 @@ class TimeSeriesDataset(FileDataset):
 class CsvDatasplit(FileDatasplit):
 
     def __init__(self, dataset, path, timestamp_column=None):
-        super().__init__(dataset, file_format='csv', path=path)
+        super().__init__(dataset, format='csv', path=path)
         self._ds = None
         self.timestamp_column = timestamp_column
 
@@ -442,6 +426,7 @@ class CsvDatasplit(FileDatasplit):
 
                 self._ds = df
                 self.dataset._dtypes = self._ds.dtypes
+
             else:
                 self._ds = read_csv(self.path, dtype=self.dataset._dtypes.to_dict(), timestamp_column=self.timestamp_column)
 
@@ -491,7 +476,7 @@ class CsvDatasplit(FileDatasplit):
 
 
 class FileConverter:
-    format: str | None = None
+    format = None
 
     def __init__(self) -> None:
         super().__init__()

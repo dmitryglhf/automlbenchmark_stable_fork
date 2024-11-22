@@ -16,7 +16,7 @@ import pandas as pd
 matplotlib.use('agg')  # no need for tk
 
 from autogluon.tabular import TabularPredictor, TabularDataset
-from autogluon.core.utils.savers import save_pd, save_pkl, save_json
+from autogluon.core.utils.savers import save_pd, save_pkl
 import autogluon.core.metrics as metrics
 from autogluon.tabular.version import __version__
 
@@ -48,14 +48,9 @@ def run(dataset, config):
 
     is_classification = config.type == 'classification'
     training_params = {k: v for k, v in config.framework_params.items() if not k.startswith('_')}
-
-    if callback_settings := training_params.get("callbacks", {}):
-        training_params["callbacks"] = initialize_callbacks(callback_settings)
-
-    time_limit = config.max_runtime_seconds
     presets = training_params.get("presets", [])
     presets = presets if isinstance(presets, list) else [presets]
-    if (preset_with_refit_full := (set(presets) & {"good_quality", "high_quality"})) and (time_limit is not None):
+    if preset_with_refit_full := (set(presets) & {"good_quality", "high_quality"}):
         preserve = 0.9
         preset = next(iter(preset_with_refit_full))
         msg = (
@@ -66,30 +61,11 @@ def run(dataset, config):
             "See https://auto.gluon.ai/stable/api/autogluon.tabular.TabularPredictor.refit_full.html"
         )
         log.info(msg)
-        time_limit = preserve * config.max_runtime_seconds
+        config.max_runtime_seconds = preserve * config.max_runtime_seconds
 
     train_path, test_path = dataset.train.path, dataset.test.path
     label = dataset.target.name
     problem_type = dataset.problem_type
-
-    """
-    The _include_test_during_fit flag enables the test_data to be passed into AutoGluon's predictor object
-    during the fit call. If enabled, it is ensured that the test_data is seperated from all training and validation
-    data. It is never seen by the models, nor does it influence the training process in any way.
-
-    One might want to use this flag when generating learning curves. If this flag is enabled and learning_curves
-    have been turned on, then your learning curve artifacts will also include curves for your test dataset.
-    """
-    _include_test_during_fit = config.framework_params.get('_include_test_during_fit', False)
-    if _include_test_during_fit:
-        training_params["test_data"] = test_path
-
-    # whether to generate learning curves (VERY EXPENSIVE. Do not enable for benchmark comparisons.)
-    if "learning_curves" in training_params:
-        lc = training_params["learning_curves"]
-        _curve_metrics = config.framework_params.get('_curve_metrics', {})
-        if isinstance(lc, dict) and "metrics" not in lc and problem_type in _curve_metrics:
-            training_params["learning_curves"]["metrics"] = _curve_metrics[problem_type]
 
     models_dir = tempfile.mkdtemp() + os.sep  # passed to AG
 
@@ -101,17 +77,15 @@ def run(dataset, config):
             problem_type=problem_type,
         ).fit(
             train_data=train_path,
-            time_limit=time_limit,
+            time_limit=config.max_runtime_seconds,
             **training_params
         )
 
     log.info(f"Finished fit in {training.duration}s.")
 
     # Persist model in memory that is going to be predicting to get correct inference latency
-    if hasattr(predictor, 'persist'):  # autogluon>=1.0
-        predictor.persist('best')
-    else:
-        predictor.persist_models('best')
+    # max_memory=0.4 will be future default: https://github.com/autogluon/autogluon/pull/3338
+    predictor.persist_models('best', max_memory=0.4)
 
     def inference_time_classification(data: Union[str, pd.DataFrame]):
         return None, predictor.predict_proba(data, as_multiclass=True)
@@ -134,18 +108,14 @@ def run(dataset, config):
     with Timer() as predict:
         predictions, probabilities = infer(test_data)
     if is_classification:
-        if hasattr(predictor, 'predict_from_proba'):  # autogluon>=1.0
-            predictions = predictor.predict_from_proba(probabilities).to_numpy()
-        else:
-            predictions = probabilities.idxmax(axis=1).to_numpy()
+        predictions = probabilities.idxmax(axis=1).to_numpy()
 
     prob_labels = probabilities.columns.values.astype(str).tolist() if probabilities is not None else None
     log.info(f"Finished predict in {predict.duration}s.")
 
-    learning_curves = predictor.learning_curves() if training_params.get("learning_curves", None) else None
     _leaderboard_extra_info = config.framework_params.get('_leaderboard_extra_info', False)  # whether to get extra model info (very verbose)
     _leaderboard_test = config.framework_params.get('_leaderboard_test', False)  # whether to compute test scores in leaderboard (expensive)
-    leaderboard_kwargs = dict(extra_info=_leaderboard_extra_info)
+    leaderboard_kwargs = dict(silent=True, extra_info=_leaderboard_extra_info)
     # Disabled leaderboard test data input by default to avoid long running computation, remove 7200s timeout limitation to re-enable
     if _leaderboard_test:
         leaderboard_kwargs['data'] = test_data
@@ -160,7 +130,7 @@ def run(dataset, config):
     else:
         num_models_ensemble = 1
 
-    save_artifacts(predictor, leaderboard, learning_curves, config)
+    save_artifacts(predictor, leaderboard, config)
     shutil.rmtree(predictor.path, ignore_errors=True)
 
     return result(output_file=config.output_predictions_file,
@@ -175,21 +145,7 @@ def run(dataset, config):
                   inference_times=inference_times,)
 
 
-def initialize_callbacks(callback_settings):
-    callbacks = []
-    try:
-        import autogluon.core.callbacks
-    except ImportError:
-        raise ValueError("Callbacks are only available for AutoGluon>=1.1.2")
-    for callback, hyperparameters in callback_settings.items():
-        callback_cls = getattr(autogluon.core.callbacks, callback, None)
-        if not callback_cls:
-            raise ValueError(f"Callback {callback} is not a valid callback")
-        callbacks.append(callback_cls(**hyperparameters))
-    return callbacks
-
-
-def save_artifacts(predictor, leaderboard, learning_curves, config):
+def save_artifacts(predictor, leaderboard, config):
     artifacts = config.framework_params.get('_save_artifacts', ['leaderboard'])
     try:
         if 'leaderboard' in artifacts:
@@ -205,12 +161,6 @@ def save_artifacts(predictor, leaderboard, learning_curves, config):
             shutil.rmtree(os.path.join(predictor.path, "utils"), ignore_errors=True)
             models_dir = output_subdir("models", config)
             zip_path(predictor.path, os.path.join(models_dir, "models.zip"))
-
-        if 'learning_curves' in artifacts:
-            assert learning_curves is not None, "No learning curves were generated!"
-            learning_curves_dir = output_subdir("learning_curves", config)
-            save_json.save(path=os.path.join(learning_curves_dir, "learning_curves.json"), obj=learning_curves)
-
     except Exception:
         log.warning("Error when saving artifacts.", exc_info=True)
 

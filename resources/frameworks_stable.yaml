@@ -94,6 +94,12 @@ TPOT:
 FEDOT:
   version: 'stable'
 
+FEDOTCustom:
+  version: 'stable'
+
+FEDOTCustomNIA:
+  version: 'stable'
+
 #######################################
 ### Non AutoML reference frameworks ###
 #######################################

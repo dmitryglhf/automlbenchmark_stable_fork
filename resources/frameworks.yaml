@@ -98,7 +98,7 @@ GAMA:
   description: |
     GAMA tries to find a good machine learning pipeline.
     For the machine learning pipeline GAMA considers data preprocessing steps, various machine learning algorithms, and their possible hyperparameters configurations.
-  project: https://github.com/openml-labs/gama
+  project: https://github.com/PGijsbers/gama
   refs: [https://joss.theoj.org/papers/10.21105/joss.01132]
 
 H2OAutoML:
@@ -145,8 +145,6 @@ MLNet:
   version: 'latest'
   description: |
     MLNET.CLI is a automated machine learning tool implemented by ml.net.
-  params:
-    _telemetry_disabled: ‘True'
 
 MLPlan:
   version: 'stable'
@@ -193,8 +191,6 @@ oboe:
 
 TPOT:
   version: 'stable'
-  description: |
-    TPOT is a Python Automated Machine Learning tool that optimizes machine learning pipelines using genetic programming.
   project: https://github.com/EpistasisLab/tpot
   refs:
     - https://academic.oup.com/bioinformatics/article/36/1/250/5511404
@@ -215,10 +211,13 @@ FEDOT:
 #  params:
 #    _save_artifacts: ['leaderboard', 'models', 'info']
 
-SapientML:
-  description: |
-    SapientML is an AutoML tool that can learn from a corpus of existing datasets and their human-written pipelines, and efficiently generate a high-quality pipeline for a predictive task on a new dataset.
-  project: https://github.com/sapientml/sapientml
+FEDOTCustom:
+  version: 'master-no-composer'
+  project: https://github.com/dmitryglhf/FEDOT
+
+FEDOTCustomNIA:
+  version: 'nia-no-composer'
+  project: https://github.com/dmitryglhf/FEDOT
 
 #######################################
 ### Non AutoML reference frameworks ###

@@ -21,14 +21,12 @@ nav:
       - Configuration: using/configuration.md
       - using/aws.md
       - using/result_analysis.md
-      - using/reproducing.md
   - Extending the Benchmark:
       - extending/index.md
       - extending/benchmark.md
       - extending/constraint.md
       - Frameworks: extending/framework.md
   - FAQ: faq.md
-  - Contributing: CONTRIBUTING.md
 
 extra_css:
   - stylesheets/extra.css
@@ -49,5 +47,5 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg

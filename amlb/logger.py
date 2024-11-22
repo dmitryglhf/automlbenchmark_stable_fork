@@ -17,7 +17,7 @@ logging.TRACE = logging.TRACE if hasattr(logging, 'TRACE') else 5
 
 class MillisFormatter(logging.Formatter):
 
-    converter = dt.datetime.fromtimestamp  # type: ignore
+    converter = dt.datetime.fromtimestamp
 
     def formatTime(self, record, datefmt=None):
         ct = self.converter(record.created)

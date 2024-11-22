@@ -2,8 +2,6 @@
 **resources** modules exposes a singleton ``Resources`` instance providing easy access to app configuration properties,
 as well as handy methods to access other resources like *automl frameworks* and *benchmark definitions*
 """
-from __future__ import annotations
-
 import copy
 import logging
 import os
@@ -256,7 +254,7 @@ class Resources:
             log.debug("Config `{config}` not set for task {name}, using default `{value}`.".format(config=conf, name=task.name, value=task[conf]))
 
 
-__INSTANCE__: Resources | None = None
+__INSTANCE__: Resources = None
 
 
 def from_config(config: Namespace):
@@ -275,9 +273,6 @@ def from_configs(*configs: Namespace):
 
 
 def get() -> Resources:
-    if __INSTANCE__ is None:
-        # TODO: Instead why not do normal lazy loading pattern?
-        raise RuntimeError("No configuration has been loaded yet.")
     return __INSTANCE__
 
 

@@ -1,10 +1,7 @@
-from __future__ import annotations
-
 import logging
-from typing import cast
+from typing import List, Tuple, Optional
 
 import openml
-import pandas as pd
 
 from amlb.utils import Namespace, str_sanitize
 
@@ -23,9 +20,11 @@ def is_openml_benchmark(benchmark: str) -> bool:
     return False
 
 
-def load_oml_benchmark(benchmark: str) -> tuple[str, str | None, list[Namespace]]:
+def load_oml_benchmark(benchmark: str) -> Tuple[str, Optional[str], List[Namespace]]:
     """ Loads benchmark defined by openml suite or task, from openml/s/X or openml/t/Y. """
     domain, oml_type, oml_id = benchmark.split('/')
+    path = None  # benchmark file does not exist on disk
+    name = benchmark  # name is later passed as cli input again for containers, it needs to remain parsable
 
     if domain == "test.openml":
         log.debug("Setting openml server to the test server.")
@@ -51,15 +50,13 @@ def load_oml_benchmark(benchmark: str) -> tuple[str, str | None, list[Namespace]
 
         # Here we know the (task, dataset) pairs so only download dataset meta-data is sufficient
         tasks = []
-        datasets = cast(pd.DataFrame, openml.datasets.list_datasets(data_id=suite.data, output_format='dataframe'))
+        datasets = openml.datasets.list_datasets(data_id=suite.data, output_format='dataframe')
         datasets.set_index('did', inplace=True)
-        for tid, did in zip(cast(list[int], suite.tasks), cast(list[int], suite.data)):
+        for tid, did in zip(suite.tasks, suite.data):
             tasks.append(Namespace(name=str_sanitize(datasets.loc[did]['name']),
                                    description=f"{openml.config.server.replace('/api/v1/xml', '')}/d/{did}",
                                    openml_task_id=tid,
                                    id="{}.org/t/{}".format(domain, tid)))
     else:
         raise ValueError(f"The oml_type is {oml_type} but must be 's' or 't'")
-    # The first argument needs to remain parsable further in the pipeline as is
-    # The second argument is path, the benchmark does not exist on disk
-    return benchmark, None, tasks
+    return name, path, tasks

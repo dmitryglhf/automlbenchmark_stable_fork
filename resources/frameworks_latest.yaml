@@ -37,9 +37,6 @@ autosklearn2:
 AutoWEKA:
   version: 'latest'
 
-flaml:
-  version: 'latest'
-
 GAMA:
   version: 'latest'
 
